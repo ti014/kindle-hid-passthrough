@@ -92,7 +92,10 @@ async def _search_attributes(sdp_client, uuids, attribute_ids):
             break
     if not accumulator:
         return []
-    lists = DataElement.from_bytes(accumulator).value
+    top = DataElement.from_bytes(accumulator)
+    if top.type != DataElement.SEQUENCE:
+        return []
+    lists = top.value
     if lists and lists[0].type != DataElement.SEQUENCE:
         lists = [DataElement.sequence(lists)]
     return [ServiceAttribute.list_from_data_elements(attributes.value)
@@ -220,7 +223,8 @@ class ClassicMixin:
         def on_open():
             addr = normalize_addr(str(channel.connection.peer_address))
             session = self.sessions.get(addr)
-            if session is None:
+            if session is None and channel.connection not in self._closing_connections \
+                    and self._is_classic_allowed(addr):
                 session = self._on_classic_connection(channel.connection)
             if session is None or session.channels is None or \
                     session.channels.connection is not channel.connection:
@@ -421,7 +425,8 @@ class ClassicMixin:
                         log.info("[Classic] Peer paged us first; yielding to incoming link")
                         existing = self.device.find_connection_by_bd_addr(
                             target, transport=BT_BR_EDR_TRANSPORT)
-                        if existing is not None and normalize_addr(addr) not in self.sessions:
+                        if existing is not None and existing not in self._closing_connections \
+                                and normalize_addr(addr) not in self.sessions:
                             self._on_classic_connection(existing)
                         await asyncio.sleep(2.0)
                     elif "DISALLOWED" in msg or "PENDING" in msg:
