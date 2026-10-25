@@ -13,6 +13,7 @@ from bumble.hci import (
 )
 from bumble.hid import HID_CONTROL_PSM, HID_INTERRUPT_PSM, Message, SetProtocolMessage
 from bumble.l2cap import ClassicChannelSpec
+from bumble.sdp import SDP_CONTINUATION_WATCHDOG, DataElement, SDP_ServiceSearchAttributeRequest, ServiceAttribute
 from bumble.sdp import Client as SDPClient
 
 from config import Protocol, clean_device_name, config, normalize_addr
@@ -70,6 +71,32 @@ def _install_interrupt_fast_path(host):
 
     host.on_packet = on_packet
     return routes
+
+
+async def _search_attributes(sdp_client, uuids, attribute_ids):
+    """Like Client.search_attributes, but also accepts an attribute list sent without its record sequence."""
+    accumulator = b''
+    continuation_state = bytes([0])
+    for _ in range(SDP_CONTINUATION_WATCHDOG):
+        response = await sdp_client.send_request(SDP_ServiceSearchAttributeRequest(
+            transaction_id=sdp_client.make_transaction_id(),
+            service_search_pattern=DataElement.sequence([DataElement.uuid(uuid) for uuid in uuids]),
+            maximum_attribute_byte_count=0xFFFF,
+            attribute_id_list=DataElement.sequence(
+                [DataElement.unsigned_integer_16(attribute_id) for attribute_id in attribute_ids]),
+            continuation_state=continuation_state,
+        ))
+        accumulator += response.attribute_lists
+        continuation_state = response.continuation_state
+        if continuation_state == bytes([0]):
+            break
+    if not accumulator:
+        return []
+    lists = DataElement.from_bytes(accumulator).value
+    if lists and lists[0].type != DataElement.SEQUENCE:
+        lists = [DataElement.sequence(lists)]
+    return [ServiceAttribute.list_from_data_elements(attributes.value)
+            for attributes in lists if attributes.type == DataElement.SEQUENCE]
 
 
 async def _wait_until(check, timeout, interval=0.05):
@@ -564,7 +591,8 @@ class ClassicMixin:
             await asyncio.wait_for(sdp_client.connect(), timeout=5.0)
 
             result = await asyncio.wait_for(
-                sdp_client.search_attributes(
+                _search_attributes(
+                    sdp_client,
                     [BT_HUMAN_INTERFACE_DEVICE_SERVICE],
                     [0x0100, 0x0206]
                 ),
