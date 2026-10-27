@@ -189,6 +189,7 @@ class HIDHost(ClassicMixin, BLEMixin):
         self.sessions = {}
         self._pairing_session = None
         self._classic_psm_registered = False
+        self._closing_connections = set()
 
         self._connection_tasks: set = set()
         self._ble_param_updates: set = set()
@@ -686,7 +687,11 @@ class HIDHost(ClassicMixin, BLEMixin):
             await session.teardown_done.wait()
             return
         was_pointer = session.is_pointer and session.uhid_device is not None
-        await session.cleanup()
+        self._closing_connections.add(session.connection)
+        try:
+            await session.cleanup()
+        finally:
+            self._closing_connections.discard(session.connection)
         if was_pointer and self._pointer_count() == 0:
             self._notify_pointer(False)
 
