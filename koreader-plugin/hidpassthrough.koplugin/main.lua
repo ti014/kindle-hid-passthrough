@@ -1882,7 +1882,8 @@ function HIDPassthrough:_doToggle(touchmenu_instance)
 end
 
 -- Battery level when a device reports one, the BT symbol while a device
--- is connected, the crossed out one while the daemon is up, otherwise nothing.
+-- is connected, the crossed out one while the daemon is up (unless the footer
+-- hides inactive items), otherwise nothing.
 function HIDPassthrough:_statusText()
     local state, body = self:getState()
     if state ~= "on" then return end
@@ -1891,7 +1892,9 @@ function HIDPassthrough:_statusText()
         return self:_batteryText()
     end
     local footer = self.ui.view and self.ui.view.footer
-    local prefix = footer and footer.settings and footer.settings.item_prefix
+    local settings = footer and footer.settings or {}
+    if idle and settings.all_at_once and settings.hide_empty_generators then return end
+    local prefix = settings.item_prefix
     if prefix == "letters" then
         return T(idle and _("%1 idle") or _("%1 on"), "ʙᴛ") -- small caps
     end
